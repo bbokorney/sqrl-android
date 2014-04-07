@@ -17,13 +17,13 @@
         android:layout_marginTop="117dp" />
 
     <TextView
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
+        android:layout_width="fill_parent"
+        android:layout_height="fill_parent"
         android:textAppearance="?android:attr/textAppearanceLarge"
-        android:text="Large Text"
-        android:id="@+id/tvResult"
+        android:id="@+id/tvStatus"
+        android:width="200dp"
         android:layout_centerVertical="true"
-        android:layout_alignLeft="@+id/btnScan"
-        android:layout_alignStart="@+id/btnScan" />
+        android:layout_centerHorizontal="true"
+        android:gravity="center" />
 
 </RelativeLayout>

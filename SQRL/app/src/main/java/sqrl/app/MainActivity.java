@@ -17,7 +17,7 @@ import com.google.zxing.integration.android.IntentResult;
 public class MainActivity extends ActionBarActivity {
 
     private final String logTag = "SQRLTag";
-    private TextView tvResult;
+    private TextView tvStatus;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -26,7 +26,7 @@ public class MainActivity extends ActionBarActivity {
 
         Button scan = (Button) findViewById(R.id.btnScan);
 
-        tvResult = (TextView) findViewById(R.id.tvResult);
+        tvStatus = (TextView) findViewById(R.id.tvStatus);
 
         scan.setOnClickListener(new View.OnClickListener() {
             @Override
@@ -40,8 +40,13 @@ public class MainActivity extends ActionBarActivity {
     public void onActivityResult(int requestCode, int resultCode, Intent intent) {
         IntentResult scanResult = IntentIntegrator.parseActivityResult(requestCode, resultCode, intent);
         if(scanResult != null) {
-            Log.d(logTag, scanResult.getContents());
-            tvResult.setText(scanResult.getContents());
+            if(scanResult.getContents() != null) {
+                Log.d(logTag, scanResult.getContents());
+                tvStatus.setText(scanResult.getContents());
+            }
+            else {
+                Log.d(logTag, "Scan result contents was null.");
+            }
         }
         else {
             Log.d(logTag, "Scan result was null.");
