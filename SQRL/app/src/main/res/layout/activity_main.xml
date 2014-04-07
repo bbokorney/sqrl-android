@@ -8,9 +8,22 @@
     android:paddingBottom="@dimen/activity_vertical_margin"
     tools:context="sqrl.app.MainActivity">
 
-    <TextView
-        android:text="@string/hello_world"
+    <Button
         android:layout_width="wrap_content"
-        android:layout_height="wrap_content" />
+        android:layout_height="wrap_content"
+        android:text="Scan QR Code"
+        android:id="@+id/btnScan"
+        android:layout_centerHorizontal="true"
+        android:layout_marginTop="117dp" />
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:textAppearance="?android:attr/textAppearanceLarge"
+        android:text="Large Text"
+        android:id="@+id/tvResult"
+        android:layout_centerVertical="true"
+        android:layout_alignLeft="@+id/btnScan"
+        android:layout_alignStart="@+id/btnScan" />
 
 </RelativeLayout>
