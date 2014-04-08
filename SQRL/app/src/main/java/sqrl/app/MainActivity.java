@@ -5,6 +5,7 @@ import android.os.AsyncTask;
 import android.support.v7.app.ActionBarActivity;
 import android.os.Bundle;
 import android.util.Base64;
+import android.util.JsonReader;
 import android.util.Log;
 import android.view.Menu;
 import android.view.MenuItem;
@@ -17,20 +18,31 @@ import com.google.zxing.integration.android.IntentResult;
 
 import org.apache.http.HttpResponse;
 import org.apache.http.NameValuePair;
+import org.apache.http.client.ClientProtocolException;
 import org.apache.http.client.HttpClient;
 import org.apache.http.client.entity.UrlEncodedFormEntity;
 import org.apache.http.client.methods.HttpPost;
 import org.apache.http.impl.client.DefaultHttpClient;
 import org.apache.http.message.BasicNameValuePair;
+import org.json.JSONException;
+import org.json.JSONObject;
 
 import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileInputStream;
+import java.io.IOException;
 import java.io.InputStream;
+import java.io.Reader;
+import java.io.StringReader;
+import java.io.UnsupportedEncodingException;
 import java.nio.charset.Charset;
+import java.security.InvalidKeyException;
 import java.security.KeyFactory;
+import java.security.NoSuchAlgorithmException;
 import java.security.PrivateKey;
 import java.security.Signature;
+import java.security.SignatureException;
+import java.security.spec.InvalidKeySpecException;
 import java.security.spec.PKCS8EncodedKeySpec;
 import java.security.spec.RSAPublicKeySpec;
 import java.security.spec.X509EncodedKeySpec;
@@ -66,7 +78,7 @@ public class MainActivity extends ActionBarActivity {
         if(scanResult != null) {
             if(scanResult.getContents() != null) {
                 Log.d(logTag, scanResult.getContents());
-                tvStatus.setText("Logging in a URL\n" + scanResult.getContents());
+                tvStatus.setText("Logging in at URL\n" + scanResult.getContents());
                 new AuthenticationRequestSender().execute(scanResult.getContents());
             }
             else {
@@ -81,17 +93,12 @@ public class MainActivity extends ActionBarActivity {
 
     @Override
     public boolean onCreateOptionsMenu(Menu menu) {
-        
-        // Inflate the menu; this adds items to the action bar if it is present.
         getMenuInflater().inflate(R.menu.main, menu);
         return true;
     }
 
     @Override
     public boolean onOptionsItemSelected(MenuItem item) {
-        // Handle action bar item clicks here. The action bar will
-        // automatically handle clicks on the Home/Up button, so long
-        // as you specify a parent activity in AndroidManifest.xml.
         int id = item.getItemId();
         if (id == R.id.action_settings) {
             return true;
@@ -103,61 +110,30 @@ public class MainActivity extends ActionBarActivity {
 
         @Override
         protected Boolean doInBackground(String... params) {
-            boolean success = true;
-            try {
-                InputStream is = getResources().openRawResource(R.raw.pkcs8_key);
+            String url = params[0];
+            boolean success;
 
-                byte[] keyData = new byte[is.available()]; // TODO: read entire file at once
-                is.read(keyData);
-
-                PKCS8EncodedKeySpec keySpec = new PKCS8EncodedKeySpec(keyData);
-                PrivateKey privateKey = KeyFactory.getInstance("RSA").generatePrivate(keySpec);
-                Signature signature = Signature.getInstance("SHA256withRSA");
-                signature.initSign(privateKey);
-                signature.update(params[0].getBytes());
-                byte[] sigData = signature.sign();
-                String b64Signature = Base64.encodeToString(sigData, Base64.DEFAULT);
-                b64Signature = b64Signature.replaceAll("\\n", "");
-                Log.d(logTag, b64Signature);
-
-
-
-                is = getResources().openRawResource(R.raw.pubkey);
-                keyData = new byte[is.available()];
-                is.read(keyData);
-
-
-                String fileString = new String(keyData, Charset.defaultCharset());
-                fileString = fileString.replaceAll("\\r\\n", "\n");
-                
-                Log.d(logTag, "The filestring:");
-                Log.d(logTag, fileString);
-
-                //System.out.println(fileString);
-
-                //System.out.println("Base 64 public key:");
-                String b64PubKey = Base64.encodeToString(fileString.getBytes(Charset.defaultCharset()), Base64.DEFAULT);
-                b64PubKey = b64PubKey.replaceAll("\\n", "");
-
-                HttpClient client = new DefaultHttpClient();
-                HttpPost post = new HttpPost(params[0]);
-                List<NameValuePair> postParams = new ArrayList<NameValuePair>();
-                postParams.add(new BasicNameValuePair("idk", b64PubKey));
-                postParams.add(new BasicNameValuePair("sig", b64Signature));
-
-                post.setEntity(new UrlEncodedFormEntity(postParams));
-                HttpResponse response = client.execute(post);
-                System.out.println(response.getStatusLine());
-                ByteArrayOutputStream out = new ByteArrayOutputStream();
-                response.getEntity().writeTo(out);
-
-                String json = out.toString();
-                System.out.println(json);
+            // read the private key
+            byte[] keyData = readFile(R.raw.pkcs8_key);
+            if(keyData == null) {
+                return false;
             }
-            catch(Exception ex) {
-                success = false;
-                Log.e(logTag, ex.toString());
+
+            // sign the url
+            String b64Signature = signData(url, keyData);
+            if(b64Signature == null) {
+                return false;
             }
+
+            // get the public key
+            keyData = readFile(R.raw.pubkey);
+            if(keyData == null) {
+                return false;
+            }
+            String b64PubKey = encodePublicKey(keyData);
+
+            // send the request
+            success = sendRequest(url, b64PubKey, b64Signature);
             return success;
         }
 
@@ -168,6 +144,93 @@ public class MainActivity extends ActionBarActivity {
             else {
                 tvStatus.setText("Error during login.");
             }
+        }
+
+        private byte[] readFile(int resourceId) {
+            ByteArrayOutputStream out = new ByteArrayOutputStream();
+            try {
+                InputStream is = getResources().openRawResource(resourceId);
+                byte[] buffer = new byte[1024];
+                int bytesRead;
+                while ((bytesRead = is.read(buffer)) != -1) {
+                    out.write(buffer, 0, bytesRead);
+                }
+            } catch (IOException ex) {
+                Log.e(logTag, ex.toString());
+                return null;
+            }
+            return out.toByteArray();
+        }
+
+        private String signData(String data, byte[] keyData) {
+            String encodedSignature;
+            byte[] sigData;
+            try {
+                PKCS8EncodedKeySpec keySpec = new PKCS8EncodedKeySpec(keyData);
+                PrivateKey privateKey = KeyFactory.getInstance("RSA").generatePrivate(keySpec);
+                Signature signature = Signature.getInstance("SHA256withRSA");
+                signature.initSign(privateKey);
+                signature.update(data.getBytes());
+                sigData = signature.sign();
+            } catch (NoSuchAlgorithmException ex) {
+                Log.e(logTag, ex.toString());
+                return null;
+            } catch(InvalidKeyException ex) {
+                Log.e(logTag, ex.toString());
+                return null;
+            } catch (InvalidKeySpecException ex) {
+                Log.e(logTag, ex.toString());
+                return null;
+            } catch(SignatureException ex) {
+                Log.e(logTag, ex.toString());
+                return null;
+            }
+
+            encodedSignature = Base64.encodeToString(sigData, Base64.DEFAULT);
+            encodedSignature = encodedSignature.replaceAll("\\n", "");
+            return encodedSignature;
+        }
+
+        private boolean sendRequest(String url, String pubKey, String signature) {
+            boolean success;
+
+            HttpClient client = new DefaultHttpClient();
+            HttpPost post = new HttpPost(url);
+            List<NameValuePair> postParams = new ArrayList<NameValuePair>();
+            postParams.add(new BasicNameValuePair("idk", pubKey));
+            postParams.add(new BasicNameValuePair("sig", signature));
+
+            try {
+                post.setEntity(new UrlEncodedFormEntity(postParams));
+                HttpResponse response = client.execute(post);
+                ByteArrayOutputStream out = new ByteArrayOutputStream();
+                response.getEntity().writeTo(out);
+
+                String json = out.toString();
+                JSONObject object = new JSONObject(json);
+                success = object.getBoolean("success");
+            } catch(UnsupportedEncodingException ex) {
+                Log.e(logTag, ex.toString());
+                return false;
+            } catch(ClientProtocolException ex) {
+                Log.e(logTag, ex.toString());
+                return false;
+            } catch(IOException ex) {
+                Log.e(logTag, ex.toString());
+                return false;
+            } catch(JSONException ex) {
+                Log.e(logTag, ex.toString());
+                return false;
+            }
+
+            return success;
+        }
+
+        private String encodePublicKey(byte[] keyData) {
+            String pubKeyString = new String(keyData, Charset.defaultCharset());
+            pubKeyString = pubKeyString.replaceAll("\\r\\n", "\n");
+            String b64PubKey = Base64.encodeToString(pubKeyString.getBytes(Charset.defaultCharset()), Base64.DEFAULT);
+            return b64PubKey.replaceAll("\\n", "");
         }
     }
 
